@@ -1,0 +1,123 @@
+{% load static %}
+{% load custom_tags %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hotel Listings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#2a6f97] min-h-screen">
+
+    <!-- Navbar -->
+    <nav class="bg-[#1a4d6e] p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-white text-2xl font-bold flex items-center gap-2">
+                <i class="fa-solid fa-hotel"></i> Hotel Booking
+            </h1>
+        </div>
+    </nav>
+
+    <!-- Search Form -->
+    <div class="container mx-auto mt-6 px-4">
+        <form method="get" action="{% url 'home' %}" 
+              class="bg-white p-6 rounded-lg shadow-lg grid grid-cols-6 gap-4">
+
+            <!-- Dates -->
+            <div>
+                <label class="block font-semibold mb-1">Check-in</label>
+                <input type="date" name="checkin" 
+                       value="{{ request.GET.checkin }}" 
+                       class="w-full border rounded p-2" required>
+            </div>
+            <div>
+                <label class="block font-semibold mb-1">Check-out</label>
+                <input type="date" name="checkout" 
+                       value="{{ request.GET.checkout }}" 
+                       class="w-full border rounded p-2" required>
+            </div>
+
+            <!-- Adults -->
+            <div>
+                <label class="block font-semibold mb-1">Adults</label>
+                <select name="adults" class="w-full border rounded p-2">
+                    {% for i in 1|to:10 %}
+                        <option value="{{ i }}" {% if request.GET.adults == i|stringformat:"s" %}selected{% endif %}>
+                            {{ i }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Children -->
+            <div>
+                <label class="block font-semibold mb-1">Children</label>
+                <select name="children" class="w-full border rounded p-2">
+                    {% for i in 0|to:10 %}
+                        <option value="{{ i }}" {% if request.GET.children == i|stringformat:"s" %}selected{% endif %}>
+                            {{ i }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Rooms -->
+            <div>
+                <label class="block font-semibold mb-1">Rooms</label>
+                <select name="rooms" class="w-full border rounded p-2">
+                    {% for i in 1|to:5 %}
+                        <option value="{{ i }}" {% if request.GET.rooms == i|stringformat:"s" %}selected{% endif %}>
+                            {{ i }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Search Btn -->
+            <div class="flex items-end">
+                <button type="submit" 
+                        class="w-full flex items-center justify-center gap-2 bg-[#2a6f97] hover:bg-[#1a4d6e] text-white font-bold py-2 px-4 rounded">
+                    <i class="fa fa-search"></i> Search
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div class="container mx-auto mt-8 px-4">
+        <h2 class="text-white text-xl font-semibold mb-4 flex items-center gap-2">
+            <i class="fa fa-bed"></i> Available Rooms
+        </h2>
+        <div class="grid md:grid-cols-3 gap-6">
+            {% for room in rooms %}
+                <div class="bg-white rounded-lg shadow-lg p-5 flex flex-col justify-between hover:shadow-xl transition">
+                    <div>
+                        <h3 class="text-xl font-bold text-[#2a6f97] mb-2">
+                            Room {{ room.room_number }} - {{ room.room_type }}
+                        </h3>
+                        <p class="text-gray-700">
+                            <i class="fa fa-bed"></i> {{ room.bed_type }} | 
+                            <i class="fa fa-user"></i> {{ room.capacity_adults }} Adults | 
+                            <i class="fa fa-child"></i> {{ room.capacity_children }} Children
+                        </p>
+                        <p class="mt-2 font-semibold text-gray-900">
+                            <i class="fa fa-money-bill-wave"></i> KSh {{ room.price_per_night|floatformat:2 }} / night
+                        </p>
+                    </div>
+                    <div class="mt-4">
+                        <a href="{% url 'book_room' room.id %}?checkin={{ request.GET.checkin }}&checkout={{ request.GET.checkout }}&adults={{ request.GET.adults }}&children={{ request.GET.children }}" 
+                           class="block text-center bg-[#2a6f97] hover:bg-[#1a4d6e] text-white font-bold py-2 px-4 rounded">
+                            <i class="fa fa-calendar-check"></i> Book Now
+                        </a>
+                    </div>
+                </div>
+            {% empty %}
+                <p class="text-white">No rooms available for the selected criteria.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="container mx-auto p-6">
+    <h2 class="text-2xl font-bold mb-4">Confirm Booking</h2>
+
+    <form method="POST" action="{% url 'finalize_booking' room.id %}">
+        {% csrf_token %}
+
+        <!-- Primary Guest Info -->
+        <h3 class="text-xl font-semibold mb-2">Primary Guest Information</h3>
+        <label class="block mb-2">Are you the primary guest?</label>
+        <select id="is_primary" name="is_primary" class="border p-2 rounded w-full mb-4">
+            <option value="yes">Yes, I am</option>
+            <option value="no">No, I’m booking for someone else</option>
+        </select>
+
+        <div id="primaryGuestFields" class="mb-6">
+            <input type="text" name="primary_first_name" placeholder="First Name" class="border p-2 rounded w-full mb-2" required>
+            <input type="text" name="primary_last_name" placeholder="Last Name" class="border p-2 rounded w-full mb-2" required>
+            <input type="email" name="primary_email" placeholder="Email" class="border p-2 rounded w-full mb-2" required>
+            <input type="text" name="primary_phone" placeholder="Phone" class="border p-2 rounded w-full mb-2">
+        </div>
+
+        <!-- Additional Guests -->
+        <h3 class="text-xl font-semibold mb-2">Guest Details</h3>
+        <p class="text-sm text-gray-600 mb-2">Please enter details for all guests (Adults + Children)</p>
+
+        <div id="guestFieldsContainer"></div>
+
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg mt-4">
+            Confirm Booking
+        </button>
+    </form>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const numAdults = {{ num_adults }};
+        const numChildren = {{ num_children }};
+        const totalGuests = numAdults + numChildren;
+        const container = document.getElementById("guestFieldsContainer");
+
+        for (let i = 1; i <= totalGuests; i++) {
+            const div = document.createElement("div");
+            div.classList.add("mb-4", "p-3", "border", "rounded");
+
+            div.innerHTML = `
+                <h4 class="font-semibold mb-2">Guest ${i}</h4>
+                <input type="text" name="guest_${i}_first_name" placeholder="First Name" class="border p-2 rounded w-full mb-2" required>
+                <input type="text" name="guest_${i}_last_name" placeholder="Last Name" class="border p-2 rounded w-full mb-2" required>
+                <input type="email" name="guest_${i}_email" placeholder="Email" class="border p-2 rounded w-full mb-2" required>
+                <input type="text" name="guest_${i}_phone" placeholder="Phone" class="border p-2 rounded w-full mb-2">
+                <input type="hidden" name="guest_${i}_is_child" value="${i > numAdults ? 1 : 0}">
+            `;
+            container.appendChild(div);
+        }
+    });
+</script>
+{% endblock %}
