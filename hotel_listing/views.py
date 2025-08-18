@@ -11,6 +11,7 @@ from .models import Room, Booking, Guest, BookingGuest, Meal, MealPreference, Pa
 from django.template.loader import render_to_string
 from django.http import HttpResponse
 import pdfkit
+import datetime
 
 def home(request):
     rooms = Room.objects.filter(is_available=True)
@@ -279,7 +280,7 @@ def confirm_booking(request, room_id):
             except Meal.DoesNotExist:
                 continue
 
-        return redirect("home")
+        return redirect("dashboard")
 
     context = {
         "room": room,
@@ -292,6 +293,8 @@ def confirm_booking(request, room_id):
         "selected_meals": selected_meals,
     }
     return render(request, "confirm_booking.html", context)
+
+
 
 def login_view(request):
     if request.user.is_authenticated:
@@ -344,6 +347,25 @@ def booking_details(request, booking_id):
     booking = get_object_or_404(Booking, id=booking_id, primary_guest=guest)
     return render(request, "booking_details.html", {"booking": booking})
 
+
+from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
+from django.db.models import Q, Sum
+from django.utils.dateparse import parse_date
+from decimal import Decimal
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate, login, logout
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from .models import Room, Booking, Guest, BookingGuest, Meal, MealPreference, Payment
+from django.http import HttpResponse
+import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+
 @login_required
 def print_receipt(request, booking_id):
     try:
@@ -353,27 +375,156 @@ def print_receipt(request, booking_id):
         return redirect("dashboard")
 
     booking = get_object_or_404(Booking, id=booking_id, primary_guest=guest)
-    if booking.payment_status != "Paid":
-        messages.error(request, "Receipt can only be printed for fully paid bookings.")
-        return redirect("dashboard")
-
-    context = {
-        "booking": booking,
-        "multiply": lambda x, y: x * y,  # Custom filter for LaTeX
-    }
-    latex_content = render_to_string("receipt.tex", context)
     
-    # Convert LaTeX to PDF using pdfkit (assumes wkhtmltopdf is installed)
-    try:
-        pdf = pdfkit.from_string(latex_content, False, configuration=pdfkit.configuration(wkhtmltopdf='path/to/wkhtmltopdf'))
-        response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="receipt_booking_{booking_id}.pdf"'
-        response.write(pdf)
-        return response
-    except Exception as e:
-        messages.error(request, f"Error generating receipt: {str(e)}")
-        return redirect("dashboard")
+    # Calculate payment status
+    total_paid = booking.payments.aggregate(total=Sum("amount"))["total"] or 0
+    booking.total_paid = total_paid
+    booking.balance = booking.total_price - total_paid
+    if total_paid >= booking.total_price:
+        booking.payment_status = "Paid"
+    elif total_paid > 0:
+        booking.payment_status = "Partial"
+    else:
+        booking.payment_status = "Unpaid"
 
+    if booking.payment_status != "Paid":
+        messages.error(request, "Receipt can only be generated for fully paid bookings.")
+        return redirect("booking_details", booking_id=booking_id)
+
+    nights = (booking.end_date - booking.start_date).days
+    room_total = booking.room.price_per_night * nights
+    meal_total = sum(pref.meal.price * nights for pref in booking.meal_preferences.filter(selected=True))
+    subtotal = room_total + meal_total
+    vat_amount = subtotal * Decimal("0.18")
+    payments = booking.payments.filter(payment_status="Completed")
+
+    # Create PDF response
+    response = HttpResponse(content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="receipt_booking_{booking.id}.pdf"'
+
+    # Create PDF document
+    doc = SimpleDocTemplate(response, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    elements = []
+
+    # Styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(name='Title', fontSize=18, fontName='Helvetica-Bold', textColor=colors.HexColor('#2a6f97'), alignment=1, spaceAfter=10)
+    subtitle_style = ParagraphStyle(name='Subtitle', fontSize=12, fontName='Helvetica', alignment=1, spaceAfter=10)
+    section_style = ParagraphStyle(name='Section', fontSize=14, fontName='Helvetica-Bold', textColor=colors.HexColor('#2a6f97'), spaceAfter=5)
+    normal_style = ParagraphStyle(name='Normal', fontSize=10, fontName='Helvetica', spaceAfter=6)
+    footer_style = ParagraphStyle(name='Footer', fontSize=8, fontName='Helvetica', textColor=colors.HexColor('#666666'), alignment=1, spaceAfter=6)
+    dash_style = ParagraphStyle(name='Dash', fontSize=10, fontName='Helvetica', spaceAfter=10, spaceBefore=10)
+
+    # Header
+    elements.append(Paragraph("Hotel Booking Receipt", title_style))
+    elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#2a6f97'), spaceAfter=10))
+    elements.append(Paragraph(f"Receipt for Booking ID: {booking.id}", subtitle_style))
+    elements.append(Paragraph(f"Issued on: {datetime.date.today()}", subtitle_style))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # Dashed line separator
+    elements.append(Paragraph("------------", dash_style))
+
+    # Guest Information
+    elements.append(Paragraph("Guest Information", section_style))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cccccc'), spaceAfter=5))
+    elements.append(Paragraph(f"Primary Guest: {booking.primary_guest.first_name} {booking.primary_guest.last_name}", normal_style))
+    elements.append(Paragraph(f"Email: {booking.primary_guest.email or 'N/A'}", normal_style))
+    elements.append(Paragraph(f"Phone: {booking.primary_guest.phone or 'N/A'}", normal_style))
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph("------------", dash_style))
+
+    # Booking Details
+    elements.append(Paragraph("Booking Details", section_style))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cccccc'), spaceAfter=5))
+    elements.append(Paragraph(f"Room Number: {booking.room.room_number} ({booking.room.room_type})", normal_style))
+    elements.append(Paragraph(f"Check-in Date: {booking.start_date}", normal_style))
+    elements.append(Paragraph(f"Check-out Date: {booking.end_date}", normal_style))
+    elements.append(Paragraph(f"Nights: {nights}", normal_style))
+    elements.append(Paragraph(f"Adults: {booking.num_adults}", normal_style))
+    elements.append(Paragraph(f"Children: {booking.num_children}", normal_style))
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph("------------", dash_style))
+
+    # Cost Breakdown
+    elements.append(Paragraph("Cost Breakdown", section_style))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cccccc'), spaceAfter=5))
+    cost_data = [
+        ['Description', 'Amount (KSh)'],
+        [f"Room Cost ({nights} nights x {booking.room.price_per_night}/night)", f"{room_total:.2f}"],
+    ]
+    for pref in booking.meal_preferences.filter(selected=True):
+        cost_data.append([f"{pref.meal.name} ({nights} nights x {pref.meal.price}/night)", f"{pref.meal.price * nights:.2f}"])
+    cost_data.extend([
+        ['Subtotal', f"{subtotal:.2f}"],
+        ['VAT (18%)', f"{vat_amount:.2f}"],
+        ['Grand Total', f"{booking.total_price:.2f}"],
+    ])
+    cost_table = Table(cost_data, colWidths=[12*cm, 5*cm])
+    cost_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a4d6e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
+    ]))
+    elements.append(cost_table)
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph("------------", dash_style))
+
+    # Payment Details
+    elements.append(Paragraph("Payment Details", section_style))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cccccc'), spaceAfter=5))
+    payment_data = [
+        ['Payment Method', 'Amount (KSh)', 'Transaction ID', 'Date'],
+    ]
+    for payment in payments:
+        payment_data.append([
+            payment.payment_method,
+            f"{payment.amount:.2f}",
+            payment.transaction_id or 'N/A',
+            payment.payment_date.strftime('%Y-%m-%d %H:%M:%S'),
+        ])
+    payment_table = Table(payment_data, colWidths=[5*cm, 4*cm, 4*cm, 4*cm])
+    payment_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a4d6e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
+    ]))
+    elements.append(payment_table)
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph("------------", dash_style))
+
+    # Additional Guests
+    elements.append(Paragraph("Additional Guests", section_style))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cccccc'), spaceAfter=5))
+    if booking.booking_guests.exists():
+        for booking_guest in booking.booking_guests.all():
+            elements.append(Paragraph(
+                f"{booking_guest.guest.first_name} {booking_guest.guest.last_name} "
+                f"({'Child' if booking_guest.is_child else 'Adult'})",
+                normal_style
+            ))
+    else:
+        elements.append(Paragraph("No additional guests.", normal_style))
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph("------------", dash_style))
+
+    # Footer
+    elements.append(Paragraph("Thank you for choosing our hotel!", footer_style))
+    elements.append(Paragraph("Contact us at: support@hotel.com | +254 700 123 456", footer_style))
+    elements.append(Paragraph(f"Order Created: {booking.created_at.strftime('%Y-%m-%d %H:%M:%S')}", footer_style))
+    elements.append(Paragraph(f"Receipt Printed: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", footer_style))
+
+    # Build PDF
+    doc.build(elements)
+    return response
 def logout_view(request):
     logout(request)
     return redirect("login")
