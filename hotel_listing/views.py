@@ -1,15 +1,16 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.db.models import Q
-from django.utils.dateparse import parse_date
-from .models import Room, Booking
-from datetime import datetime
+from django.urls import reverse
+from django.db.models import Q, Sum
 from django.utils.dateparse import parse_date
 from decimal import Decimal
-
-from .models import Room, Booking, Guest, BookingGuest
-from django.utils import timezone
-from decimal import Decimal
-
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate, login, logout
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from .models import Room, Booking, Guest, BookingGuest, Meal, MealPreference, Payment
+from django.template.loader import render_to_string
+from django.http import HttpResponse
+import pdfkit
 
 def home(request):
     rooms = Room.objects.filter(is_available=True)
@@ -19,14 +20,14 @@ def home(request):
     adults = request.GET.get('adults')
     children = request.GET.get('children')
     num_rooms = request.GET.get('rooms')
+    room_type = request.GET.get('room_type')
+    bed_type = request.GET.get('bed_type')
 
-    # Parse dates properly
     if checkin and checkout:
         checkin_date = parse_date(checkin)
         checkout_date = parse_date(checkout)
 
         if checkin_date and checkout_date:
-            # Exclude rooms already booked in that range
             booked_rooms = Booking.objects.filter(
                 Q(start_date__lt=checkout_date),
                 Q(end_date__gt=checkin_date),
@@ -35,190 +36,374 @@ def home(request):
 
             rooms = rooms.exclude(id__in=booked_rooms)
 
-    # Cast numeric filters
-    if adults:
+    if adults and adults.isdigit():
         rooms = rooms.filter(capacity_adults__gte=int(adults))
-    if children:
+    if children and children.isdigit():
         rooms = rooms.filter(capacity_children__gte=int(children))
-    if num_rooms:
-        rooms = rooms.filter(total_rooms__gte=int(num_rooms)) if hasattr(Room, "total_rooms") else rooms
+    if num_rooms and num_rooms.isdigit():
+        if hasattr(Room, "total_rooms"):
+            rooms = rooms.filter(total_rooms__gte=int(num_rooms))
+
+    if room_type:
+        rooms = rooms.filter(room_type__iexact=room_type)
+    if bed_type:
+        rooms = rooms.filter(bed_type__iexact=bed_type)
 
     context = {
         "rooms": rooms,
+        "error": request.GET.get('error')
     }
     return render(request, "home.html", context)
 
-
 def book_room(request, room_id):
     room = get_object_or_404(Room, id=room_id)
+    meals = Meal.objects.all()
 
-    # Get params
     checkin = request.GET.get("checkin")
     checkout = request.GET.get("checkout")
-    adults = request.GET.get("adults", 1)
-    children = request.GET.get("children", 0)
+    adults = request.GET.get("adults")
+    children = request.GET.get("children")
+    rooms = request.GET.get("rooms")
+    selected_meals = request.GET.getlist("meals")
 
-    checkin_date = parse_date(checkin) if checkin else None
-    checkout_date = parse_date(checkout) if checkout else None
+    if not checkin or not checkout or not adults:
+        return redirect(f"{reverse('home')}?error=Please+fill+in+check-in,+check-out,+and+adults+fields")
 
-    nights = 0
-    total_price = Decimal("0.00")
-    vat_amount = Decimal("0.00")
-    grand_total = Decimal("0.00")
+    try:
+        adults = int(adults) if adults and adults.isdigit() else 1
+        children = int(children) if children and children.isdigit() else 0
+        rooms = int(rooms) if rooms and rooms.isdigit() else 1
+    except ValueError:
+        return redirect(f"{reverse('home')}?error=Invalid+input+for+adults,+children,+or+rooms")
 
-    if checkin_date and checkout_date and checkout_date > checkin_date:
-        nights = (checkout_date - checkin_date).days
-        total_price = room.price_per_night * nights
-        vat_amount = total_price * Decimal("0.18")  # ✅ fixed here
-        grand_total = total_price + vat_amount
-
-    if request.method == "POST":
-        Booking.objects.create(
-            room=room,
-            start_date=request.POST.get("checkin"),
-            end_date=request.POST.get("checkout"),
-            num_adults=adults,
-            num_children=children,
-            total_price=grand_total,
-            booking_status="Pending",
-        )
-        return redirect("home")
+    checkin_date = parse_date(checkin)
+    checkout_date = parse_date(checkout)
+    if not checkin_date or not checkout_date or checkout_date <= checkin_date:
+        return redirect(f"{reverse('home')}?error=Invalid+check-in+or+check-out+date")
 
     context = {
         "room": room,
+        "meals": meals,
         "checkin": checkin,
         "checkout": checkout,
         "adults": adults,
         "children": children,
-        "nights": nights,
-        "total_price": total_price,
-        "vat_amount": vat_amount,
-        "grand_total": grand_total,
+        "rooms": rooms,
+        "selected_meals": selected_meals,
     }
     return render(request, "book_room.html", context)
 
-
-
-
-def finalize_booking(request, room_id):
+def confirm_booking(request, room_id):
     room = get_object_or_404(Room, id=room_id)
+    meals = Meal.objects.all()
 
-    if request.method == "POST":
-        # Primary Guest
-        is_primary = request.POST.get("is_primary") == "yes"
-        first_name = request.POST["primary_first_name"]
-        last_name = request.POST["primary_last_name"]
-        email = request.POST["primary_email"]
-        phone = request.POST.get("primary_phone")
-
-        primary_guest, _ = Guest.objects.get_or_create(
-            email=email,
-            defaults={"first_name": first_name, "last_name": last_name, "phone": phone}
-        )
-
-        # Booking object
-        start_date = request.session.get("checkin")
-        end_date = request.session.get("checkout")
-        num_adults = request.session.get("num_adults")
-        num_children = request.session.get("num_children")
-        total_price = Decimal(str(request.session.get("total_price")))
-
-        booking = Booking.objects.create(
-            primary_guest=primary_guest,
-            room=room,
-            start_date=start_date,
-            end_date=end_date,
-            num_adults=num_adults,
-            num_children=num_children,
-            total_price=total_price,
-            booking_status="Pending"
-        )
-
-        # Loop guests
-        total_guests = int(num_adults) + int(num_children)
-        for i in range(1, total_guests + 1):
-            g_first = request.POST[f"guest_{i}_first_name"]
-            g_last = request.POST[f"guest_{i}_last_name"]
-            g_email = request.POST[f"guest_{i}_email"]
-            g_phone = request.POST.get(f"guest_{i}_phone")
-            is_child = request.POST[f"guest_{i}_is_child"] == "1"
-
-            guest, _ = Guest.objects.get_or_create(
-                email=g_email,
-                defaults={"first_name": g_first, "last_name": g_last, "phone": g_phone}
-            )
-
-            BookingGuest.objects.create(
-                booking=booking,
-                guest=guest,
-                is_child=is_child
-            )
-
-        return redirect("booking_success", booking_id=booking.id)
-
-    return render(request, "booking_confirm.html", {"room": room})
-
-
-    room = get_object_or_404(Room, id=room_id)
-
-    # Get params
     checkin = request.GET.get("checkin")
     checkout = request.GET.get("checkout")
-    adults = request.GET.get("adults", 1)
-    children = request.GET.get("children", 0)
+    adults = request.GET.get("adults")
+    children = request.GET.get("children")
+    rooms = request.GET.get("rooms")
+    selected_meals = request.GET.getlist("meals")
 
-    checkin_date = parse_date(checkin) if checkin else None
-    checkout_date = parse_date(checkout) if checkout else None
+    if not checkin or not checkout or not adults:
+        return redirect(f"{reverse('home')}?error=Please+fill+in+check-in,+check-out,+and+adults+fields")
 
-    nights = 0
-    total_price = 0
-    vat_amount = 0
-    grand_total = 0
+    try:
+        adults = int(adults) if adults and adults.isdigit() else 1
+        children = int(children) if children and children.isdigit() else 0
+        rooms = int(rooms) if rooms and rooms.isdigit() else 1
+    except ValueError:
+        return redirect(f"{reverse('home')}?error=Invalid+input+for+adults,+children,+or+rooms")
 
-    if checkin_date and checkout_date and checkout_date > checkin_date:
-        nights = (checkout_date - checkin_date).days
-        total_price = room.price_per_night * nights
-        vat_amount = total_price * 0.18
-        grand_total = total_price + vat_amount
+    checkin_date = parse_date(checkin)
+    checkout_date = parse_date(checkout)
+    if not checkin_date or not checkout_date or checkout_date <= checkin_date:
+        return redirect(f"{reverse('home')}?error=Invalid+check-in+or+check-out+date")
 
     if request.method == "POST":
-        # Booking creation (expand with guest data later)
-        Booking.objects.create(
-            room=room,
-            start_date=request.POST.get("checkin"),
-            end_date=request.POST.get("checkout"),
-            num_adults=adults,
-            num_children=children,
-            total_price=grand_total,
-            booking_status="Pending",
-        )
+        if adults > room.capacity_adults * rooms or children > room.capacity_children * rooms:
+            return render(request, "confirm_booking.html", {
+                "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                "error": "Booking exceeds room capacity!"
+            })
+
+        if request.user.is_authenticated:
+            try:
+                primary_guest = request.user.guest_profile
+            except Guest.DoesNotExist:
+                return render(request, "confirm_booking.html", {
+                    "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                    "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                    "error": "No guest profile found for this user."
+                })
+        else:
+            password = request.POST.get("password")
+            confirm_password = request.POST.get("confirm_password")
+            if password != confirm_password:
+                return render(request, "confirm_booking.html", {
+                    "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                    "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                    "error": "Passwords do not match."
+                })
+            if not password or len(password) < 8:
+                return render(request, "confirm_booking.html", {
+                    "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                    "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                    "error": "Password must be at least 8 characters long."
+                })
+
+            username = request.POST.get("username")
+            email = request.POST.get("email")
+            try:
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=password,
+                    first_name=request.POST["first_name"],
+                    last_name=request.POST["last_name"]
+                )
+                primary_guest = Guest.objects.create(
+                    user=user,
+                    first_name=request.POST["first_name"],
+                    last_name=request.POST["last_name"],
+                    email=email,
+                    phone=request.POST.get("phone", "")
+                )
+            except Exception as e:
+                return render(request, "confirm_booking.html", {
+                    "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                    "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                    "error": f"Error creating primary guest: {str(e)}"
+                })
+
+        nights = (checkout_date - checkin_date).days
+        room_total = room.price_per_night * nights * rooms
+        meal_total = Decimal("0.00")
+        for meal_id in request.POST.getlist("meals"):
+            try:
+                meal = Meal.objects.get(id=meal_id)
+                meal_total += meal.price * nights * rooms
+            except Meal.DoesNotExist:
+                continue
+        total_price = room_total + meal_total
+        vat_amount = total_price * Decimal("0.18")
+        grand_total = total_price + vat_amount
+
+        try:
+            booking = Booking.objects.create(
+                primary_guest=primary_guest,
+                room=room,
+                start_date=checkin_date,
+                end_date=checkout_date,
+                num_adults=adults,
+                num_children=children,
+                total_price=grand_total,
+                booking_status="Pending"
+            )
+        except Exception as e:
+            return render(request, "confirm_booking.html", {
+                "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                "error": f"Error creating booking: {str(e)}"
+            })
+
+        is_primary_guest_in_booking = request.POST.get("is_primary_guest_in_booking") == "on"
+        if is_primary_guest_in_booking:
+            try:
+                BookingGuest.objects.create(booking=booking, guest=primary_guest, is_child=False)
+            except Exception as e:
+                return render(request, "confirm_booking.html", {
+                    "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                    "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                    "error": f"Error linking primary guest to booking: {str(e)}"
+                })
+
+        required_adults = adults - 1 if is_primary_guest_in_booking else adults
+        added_adults = 0
+        for i in range(1, required_adults + 1):
+            first = request.POST.get(f"adult_{i}_first")
+            last = request.POST.get(f"adult_{i}_last")
+            email = request.POST.get(f"adult_{i}_email")
+            phone = request.POST.get(f"adult_{i}_phone", "")
+            if first and last and email:
+                try:
+                    guest = Guest.objects.create(
+                        first_name=first,
+                        last_name=last,
+                        email=email,
+                        phone=phone
+                    )
+                    BookingGuest.objects.create(booking=booking, guest=guest, is_child=False)
+                    added_adults += 1
+                except Exception as e:
+                    return render(request, "confirm_booking.html", {
+                        "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                        "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                        "error": f"Error adding adult guest {first} {last}: {str(e)}"
+                    })
+
+        added_children = 0
+        for i in range(1, children + 1):
+            first = request.POST.get(f"child_{i}_first")
+            last = request.POST.get(f"child_{i}_last")
+            email = request.POST.get(f"child_{i}_email", "")
+            phone = request.POST.get(f"child_{i}_phone", "")
+            if first and last:
+                try:
+                    guest = Guest.objects.create(
+                        first_name=first,
+                        last_name=last,
+                        email=email or f"child{i}_{booking.id}@noemail.com",
+                        phone=phone
+                    )
+                    BookingGuest.objects.create(booking=booking, guest=guest, is_child=True)
+                    added_children += 1
+                except Exception as e:
+                    return render(request, "confirm_booking.html", {
+                        "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                        "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                        "error": f"Error adding child guest {first} {last}: {str(e)}"
+                    })
+
+        if added_adults < required_adults or added_children < children:
+            return render(request, "confirm_booking.html", {
+                "room": room, "meals": meals, "checkin": checkin, "checkout": checkout,
+                "adults": adults, "children": children, "rooms": rooms, "selected_meals": selected_meals,
+                "error": f"Please provide all required guests. Needed: {required_adults} adult(s), {children} child(ren)."
+            })
+
+        for meal_id in request.POST.getlist("meals"):
+            try:
+                meal = Meal.objects.get(id=meal_id)
+                MealPreference.objects.create(booking=booking, meal=meal, selected=True)
+            except Meal.DoesNotExist:
+                continue
+
         return redirect("home")
 
     context = {
         "room": room,
+        "meals": meals,
         "checkin": checkin,
         "checkout": checkout,
         "adults": adults,
         "children": children,
-        "nights": nights,
-        "total_price": total_price,
-        "vat_amount": vat_amount,
-        "grand_total": grand_total,
+        "rooms": rooms,
+        "selected_meals": selected_meals,
     }
-    return render(request, "book_room.html", context)
+    return render(request, "confirm_booking.html", context)
 
-    """Simple placeholder for booking page"""
-    room = get_object_or_404(Room, id=room_id)
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect("home")
+
+    if request.method == "POST":
+        username = request.POST.get("username")
+        password = request.POST.get("password")
+
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            return redirect("dashboard")
+        else:
+            messages.error(request, "Invalid username or password.")
+            return render(request, "login.html")
+
+    return render(request, "login.html")
+
+@login_required
+def dashboard(request):
+    try:
+        guest = request.user.guest_profile
+    except Guest.DoesNotExist:
+        messages.error(request, "No guest profile found for this user.")
+        return redirect("home")
+
+    bookings = guest.bookings.all()
+    for booking in bookings:
+        total_paid = booking.payments.aggregate(total=Sum("amount"))["total"] or 0
+        booking.total_paid = total_paid
+        booking.balance = booking.total_price - total_paid
+        if total_paid >= booking.total_price:
+            booking.payment_status = "Paid"
+        elif total_paid > 0:
+            booking.payment_status = "Partial"
+        else:
+            booking.payment_status = "Unpaid"
+
+    return render(request, "dashboard.html", {"guest": guest, "bookings": bookings})
+
+@login_required
+def booking_details(request, booking_id):
+    try:
+        guest = request.user.guest_profile
+    except Guest.DoesNotExist:
+        messages.error(request, "No guest profile found for this user.")
+        return redirect("dashboard")
+
+    booking = get_object_or_404(Booking, id=booking_id, primary_guest=guest)
+    return render(request, "booking_details.html", {"booking": booking})
+
+@login_required
+def print_receipt(request, booking_id):
+    try:
+        guest = request.user.guest_profile
+    except Guest.DoesNotExist:
+        messages.error(request, "No guest profile found for this user.")
+        return redirect("dashboard")
+
+    booking = get_object_or_404(Booking, id=booking_id, primary_guest=guest)
+    if booking.payment_status != "Paid":
+        messages.error(request, "Receipt can only be printed for fully paid bookings.")
+        return redirect("dashboard")
+
+    context = {
+        "booking": booking,
+        "multiply": lambda x, y: x * y,  # Custom filter for LaTeX
+    }
+    latex_content = render_to_string("receipt.tex", context)
     
-    if request.method == "POST":
-        # Example logic: create booking (expand this later)
-        Booking.objects.create(
-            room=room,
-            start_date=request.POST.get("checkin"),
-            end_date=request.POST.get("checkout"),
-            booking_status="Pending",
-            # Add user field if you have authentication
-        )
-        return redirect("home")
+    # Convert LaTeX to PDF using pdfkit (assumes wkhtmltopdf is installed)
+    try:
+        pdf = pdfkit.from_string(latex_content, False, configuration=pdfkit.configuration(wkhtmltopdf='path/to/wkhtmltopdf'))
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="receipt_booking_{booking_id}.pdf"'
+        response.write(pdf)
+        return response
+    except Exception as e:
+        messages.error(request, f"Error generating receipt: {str(e)}")
+        return redirect("dashboard")
 
-    return render(request, "book_room.html", {"room": room})
+def logout_view(request):
+    logout(request)
+    return redirect("login")
+
+@login_required
+def add_payment(request, booking_id):
+    booking = get_object_or_404(Booking, id=booking_id)
+    if Payment.objects.filter(booking=booking).exists():
+        messages.warning(request, "Payment already exists for this booking.")
+        return redirect("dashboard")
+
+    if request.method == "POST":
+        try:
+            amount = Decimal(request.POST.get("amount"))
+            method = request.POST.get("method")
+            transaction_code = request.POST.get("transaction_code", "").strip()
+            transaction_id = transaction_code if transaction_code else None
+            payment_status = "Completed" if transaction_id else "Pending"
+
+            Payment.objects.create(
+                booking=booking,
+                amount=amount,
+                payment_method=method,
+                transaction_id=transaction_id,
+                payment_status=payment_status
+            )
+            messages.success(request, "Payment added successfully.")
+            return redirect("dashboard")
+        except Exception as e:
+            messages.error(request, f"Error adding payment: {str(e)}")
+            return render(request, "add_payment.html", {"booking": booking})
+
+    return render(request, "add_payment.html", {"booking": booking})

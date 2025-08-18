@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MinValueValidator
-from django.db.models import CheckConstraint, Q
+from django.db.models import CheckConstraint, Q, F
+from django.contrib.auth.models import User
 
 class Room(models.Model):
     room_number = models.CharField(max_length=10, unique=True)
@@ -10,7 +11,11 @@ class Room(models.Model):
     price_per_night = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
     bed_type = models.CharField(
         max_length=20,
-        choices=[('Single', 'Single Bed'), ('Double', 'Double Bed'), ('Two Singles', 'Two Single Beds')]
+        choices=[
+            ('Single', 'Single Bed'),
+            ('Double', 'Double Bed'),
+            ('Two Singles', 'Two Single Beds')
+        ]
     )
     is_available = models.BooleanField(default=True)
 
@@ -21,9 +26,10 @@ class Room(models.Model):
         return f"{self.room_number} ({self.room_type}, {self.bed_type})"
 
 class Guest(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True, related_name='guest_profile')
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
-    email = models.EmailField(max_length=100, unique=True)
+    email = models.EmailField(max_length=100, null=True, blank=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
 
     class Meta:
@@ -32,6 +38,8 @@ class Guest(models.Model):
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
+
+
 class Booking(models.Model):
     STATUS_CHOICES = [
         ('Confirmed', 'Confirmed'),
@@ -39,7 +47,7 @@ class Booking(models.Model):
         ('Cancelled', 'Cancelled'),
     ]
 
-    primary_guest = models.ForeignKey(Guest, on_delete=models.CASCADE, related_name='bookings')
+    primary_guest = models.ForeignKey(Guest, on_delete=models.CASCADE, null=True, related_name='bookings')
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
     start_date = models.DateField()
     end_date = models.DateField()
@@ -53,7 +61,7 @@ class Booking(models.Model):
         db_table = 'bookings'
         constraints = [
             CheckConstraint(
-                check=Q(end_date__gt=models.F('start_date')),
+                check=Q(end_date__gt=F('start_date')),
                 name='check_dates'
             ),
             CheckConstraint(
@@ -77,17 +85,27 @@ class BookingGuest(models.Model):
     def __str__(self):
         return f"{self.guest} in Booking {self.booking.id} ({'Child' if self.is_child else 'Adult'})"
 
+class Meal(models.Model):
+    name = models.CharField(max_length=50, unique=True)  # e.g., Breakfast, Lunch, Dinner
+    price = models.DecimalField(max_digits=6, decimal_places=2)
+
+    class Meta:
+        db_table = 'meals'
+
+    def __str__(self):
+        return f"{self.name} (${self.price})"
+
 class MealPreference(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='meal_preferences')
-    breakfast = models.BooleanField(default=False)
-    lunch = models.BooleanField(default=False)
-    dinner = models.BooleanField(default=False)
+    meal = models.ForeignKey(Meal, on_delete=models.CASCADE, related_name='meal_preferences')
+    selected = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'meal_preferences'
+        unique_together = ('booking', 'meal')
 
     def __str__(self):
-        return f"Meal Preferences for Booking {self.booking.id}"
+        return f"{self.booking} - {self.meal.name} ({'Selected' if self.selected else 'Not Selected'})"
 
 class Payment(models.Model):
     PAYMENT_METHOD_CHOICES = [

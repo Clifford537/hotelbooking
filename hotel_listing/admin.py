@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Room, Guest, Booking, BookingGuest, MealPreference, Payment
+from .models import Room, Guest, Booking, BookingGuest, Meal, MealPreference, Payment
 
 
 @admin.register(Room)
@@ -26,6 +26,7 @@ class BookingGuestInline(admin.TabularInline):
 class MealPreferenceInline(admin.TabularInline):
     model = MealPreference
     extra = 1
+    autocomplete_fields = ['meal']  # Optional: makes meal selection easier
 
 
 class PaymentInline(admin.TabularInline):
@@ -52,7 +53,6 @@ class PaymentAdmin(admin.ModelAdmin):
     ordering = ("-payment_date",)
 
 
-# Register inline models separately if needed
 @admin.register(BookingGuest)
 class BookingGuestAdmin(admin.ModelAdmin):
     list_display = ("booking", "guest", "is_child")
@@ -60,8 +60,19 @@ class BookingGuestAdmin(admin.ModelAdmin):
     search_fields = ("booking__id", "guest__first_name", "guest__last_name")
 
 
+@admin.register(Meal)
+class MealAdmin(admin.ModelAdmin):
+    list_display = ("name", "price")
+    search_fields = ("name",)
+    ordering = ("name",)
+
+
 @admin.register(MealPreference)
 class MealPreferenceAdmin(admin.ModelAdmin):
-    list_display = ("booking", "breakfast", "lunch", "dinner")
-    list_filter = ("breakfast", "lunch", "dinner")
-    search_fields = ("booking__id", "booking__primary_guest__first_name", "booking__primary_guest__last_name")
+    list_display = ("booking", "get_meal_name", "selected")
+    list_filter = ("selected", "meal")
+    search_fields = ("booking__id", "booking__primary_guest__first_name", "meal__name")
+
+    def get_meal_name(self, obj):
+        return obj.meal.name
+    get_meal_name.short_description = "Meal"

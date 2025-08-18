@@ -12,75 +12,128 @@
 <body class="bg-[#2a6f97] min-h-screen">
 
     <!-- Navbar -->
-    <nav class="bg-[#1a4d6e] p-4 shadow-md">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-white text-2xl font-bold flex items-center gap-2">
-                <i class="fa-solid fa-hotel"></i> Hotel Booking
-            </h1>
-        </div>
-    </nav>
+<!-- Navbar -->
+<nav class="bg-[#1a4d6e] p-4 shadow-md">
+    <div class="container mx-auto flex justify-between items-center">
+        <h1 class="text-white text-2xl font-bold flex items-center gap-2">
+            <i class="fa-solid fa-hotel"></i> Hotel Booking
+        </h1>
+
+        <!-- Auth Buttons -->
+        {% if user.is_authenticated %}
+            <a href="{% url 'logout' %}" 
+               class="bg-red-600 text-white font-semibold px-4 py-2 rounded hover:bg-red-700 transition">
+                <i class="fa fa-sign-out-alt"></i> Logout
+            </a>
+        {% else %}
+            <a href="{% url 'login' %}" 
+               class="bg-white text-[#1a4d6e] font-semibold px-4 py-2 rounded hover:bg-gray-200 transition">
+                <i class="fa fa-sign-in-alt"></i> Login
+            </a>
+        {% endif %}
+    </div>
+</nav>
+
 
     <!-- Search Form -->
     <div class="container mx-auto mt-6 px-4">
-        <form method="get" action="{% url 'home' %}" 
-              class="bg-white p-6 rounded-lg shadow-lg grid grid-cols-6 gap-4">
+        {% if error %}
+            <p class="text-red-600 text-sm mb-4">{{ error }}</p>
+        {% endif %}
+        <form method="get" action="{% url 'home' %}" id="searchForm" 
+              class="bg-white p-6 rounded-lg shadow-lg">
+            <!-- Top Row -->
+            <div class="grid grid-cols-6 gap-4">
+                <!-- Dates -->
+                <div>
+                    <label class="block font-semibold mb-1">Check-in</label>
+                    <input type="date" name="checkin" id="checkin"
+                           value="{{ request.GET.checkin }}" 
+                           class="w-full border rounded p-2" required>
+                </div>
+                <div>
+                    <label class="block font-semibold mb-1">Check-out</label>
+                    <input type="date" name="checkout" id="checkout"
+                           value="{{ request.GET.checkout }}" 
+                           class="w-full border rounded p-2" required>
+                </div>
 
-            <!-- Dates -->
-            <div>
-                <label class="block font-semibold mb-1">Check-in</label>
-                <input type="date" name="checkin" 
-                       value="{{ request.GET.checkin }}" 
-                       class="w-full border rounded p-2" required>
-            </div>
-            <div>
-                <label class="block font-semibold mb-1">Check-out</label>
-                <input type="date" name="checkout" 
-                       value="{{ request.GET.checkout }}" 
-                       class="w-full border rounded p-2" required>
+                <!-- Adults -->
+                <div>
+                    <label class="block font-semibold mb-1">Adults</label>
+                    <select name="adults" id="adults" class="w-full border rounded p-2">
+                        {% for i in 1|to:10 %}
+                            <option value="{{ i }}" {% if request.GET.adults == i|stringformat:"s" %}selected{% endif %}>
+                                {{ i }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Children -->
+                <div>
+                    <label class="block font-semibold mb-1">Children</label>
+                    <select name="children" id="children" class="w-full border rounded p-2">
+                        {% for i in 0|to:10 %}
+                            <option value="{{ i }}" {% if request.GET.children == i|stringformat:"s" %}selected{% endif %}>
+                                {{ i }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Rooms -->
+                <div>
+                    <label class="block font-semibold mb-1">Rooms</label>
+                    <select name="rooms" id="rooms" class="w-full border rounded p-2">
+                        {% for i in 1|to:5 %}
+                            <option value="{{ i }}" {% if request.GET.rooms == i|stringformat:"s" %}selected{% endif %}>
+                                {{ i }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Search Btn -->
+                <div class="flex items-end">
+                    <button type="submit" 
+                            class="w-full flex items-center justify-center gap-2 bg-[#2a6f97] hover:bg-[#1a4d6e] text-white font-bold py-2 px-4 rounded">
+                        <i class="fa fa-search"></i> Search
+                    </button>
+                </div>
             </div>
 
-            <!-- Adults -->
-            <div>
-                <label class="block font-semibold mb-1">Adults</label>
-                <select name="adults" class="w-full border rounded p-2">
-                    {% for i in 1|to:10 %}
-                        <option value="{{ i }}" {% if request.GET.adults == i|stringformat:"s" %}selected{% endif %}>
-                            {{ i }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
+            <!-- Small Filters -->
+            <div class="grid grid-cols-3 gap-4 mt-4">
+                <!-- Room Type -->
+                <div>
+                    <label class="block text-sm font-semibold mb-1">Room Type</label>
+                    <select name="room_type" class="w-full border rounded p-2 text-sm">
+                        <option value="">Any</option>
+                        <option value="Single" {% if request.GET.room_type == "Single" %}selected{% endif %}>Single</option>
+                        <option value="Double" {% if request.GET.room_type == "Double" %}selected{% endif %}>Double</option>
+                        <option value="Suite" {% if request.GET.room_type == "Suite" %}selected{% endif %}>Suite</option>
+                    </select>
+                </div>
 
-            <!-- Children -->
-            <div>
-                <label class="block font-semibold mb-1">Children</label>
-                <select name="children" class="w-full border rounded p-2">
-                    {% for i in 0|to:10 %}
-                        <option value="{{ i }}" {% if request.GET.children == i|stringformat:"s" %}selected{% endif %}>
-                            {{ i }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
+                <!-- Bed Type -->
+                <div>
+                    <label class="block text-sm font-semibold mb-1">Bed Type</label>
+                    <select name="bed_type" class="w-full border rounded p-2 text-sm">
+                        <option value="">Any</option>
+                        <option value="Single" {% if request.GET.bed_type == "Single" %}selected{% endif %}>Single</option>
+                        <option value="Double" {% if request.GET.bed_type == "Double" %}selected{% endif %}>Double</option>
+                        <option value="Two Singles" {% if request.GET.bed_type == "Two Singles" %}selected{% endif %}>Two Singles</option>
+                    </select>
+                </div>
 
-            <!-- Rooms -->
-            <div>
-                <label class="block font-semibold mb-1">Rooms</label>
-                <select name="rooms" class="w-full border rounded p-2">
-                    {% for i in 1|to:5 %}
-                        <option value="{{ i }}" {% if request.GET.rooms == i|stringformat:"s" %}selected{% endif %}>
-                            {{ i }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- Search Btn -->
-            <div class="flex items-end">
-                <button type="submit" 
-                        class="w-full flex items-center justify-center gap-2 bg-[#2a6f97] hover:bg-[#1a4d6e] text-white font-bold py-2 px-4 rounded">
-                    <i class="fa fa-search"></i> Search
-                </button>
+                <!-- Filter Button -->
+                <div class="flex items-end">
+                    <button type="submit" 
+                            class="w-full bg-gray-700 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded text-sm">
+                        <i class="fa fa-filter"></i> Filter
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -107,8 +160,8 @@
                         </p>
                     </div>
                     <div class="mt-4">
-                        <a href="{% url 'book_room' room.id %}?checkin={{ request.GET.checkin }}&checkout={{ request.GET.checkout }}&adults={{ request.GET.adults }}&children={{ request.GET.children }}" 
-                           class="block text-center bg-[#2a6f97] hover:bg-[#1a4d6e] text-white font-bold py-2 px-4 rounded">
+                        <a href="{% url 'book_room' room.id %}?{% if request.GET.checkin %}checkin={{ request.GET.checkin }}&{% endif %}{% if request.GET.checkout %}checkout={{ request.GET.checkout }}&{% endif %}{% if request.GET.adults %}adults={{ request.GET.adults }}&{% endif %}{% if request.GET.children %}children={{ request.GET.children }}{% endif %}" 
+                           class="block text-center bg-[#2a6f97] hover:bg-[#1a4d6e] text-white font-bold py-2 px-4 rounded book-now-link">
                             <i class="fa fa-calendar-check"></i> Book Now
                         </a>
                     </div>
@@ -119,5 +172,56 @@
         </div>
     </div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchForm = document.getElementById('searchForm');
+            const bookNowLinks = document.querySelectorAll('.book-now-link');
+
+            function updateBookNowLinks() {
+                const checkin = document.getElementById('checkin').value;
+                const checkout = document.getElementById('checkout').value;
+                const adults = document.getElementById('adults').value;
+
+                bookNowLinks.forEach(link => {
+                    // Update href dynamically
+                    const baseUrl = link.getAttribute('href').split('?')[0];
+                    const params = [];
+                    if (checkin) params.push(`checkin=${checkin}`);
+                    if (checkout) params.push(`checkout=${checkout}`);
+                    if (adults) params.push(`adults=${adults}`);
+                    const children = document.getElementById('children').value;
+                    if (children) params.push(`children=${children}`);
+                    link.setAttribute('href', `${baseUrl}?${params.join('&')}`);
+                });
+            }
+
+            // Update links on page load
+            updateBookNowLinks();
+
+            // Update links on form input changes
+            searchForm.addEventListener('input', updateBookNowLinks);
+
+            // Disable buttons only after invalid form submission
+            searchForm.addEventListener('submit', function(e) {
+                const checkin = document.getElementById('checkin').value;
+                const checkout = document.getElementById('checkout').value;
+                const adults = document.getElementById('adults').value;
+                if (!checkin || !checkout || !adults) {
+                    e.preventDefault();
+                    alert('Please fill in check-in, check-out, and adults fields.');
+                    bookNowLinks.forEach(link => {
+                        link.classList.add('opacity-50', 'cursor-not-allowed');
+                        link.setAttribute('disabled', 'disabled');
+                        link.removeAttribute('href');
+                    });
+                } else {
+                    bookNowLinks.forEach(link => {
+                        link.classList.remove('opacity-50', 'cursor-not-allowed');
+                        link.removeAttribute('disabled');
+                    });
+                }
+            });
+        });
+    </script>
 </body>
 </html>
