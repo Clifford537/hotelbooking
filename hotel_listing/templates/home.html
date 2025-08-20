@@ -12,28 +12,36 @@
 <body class="bg-[#2a6f97] min-h-screen">
 
     <!-- Navbar -->
-<!-- Navbar -->
-<nav class="bg-[#1a4d6e] p-4 shadow-md">
-    <div class="container mx-auto flex justify-between items-center">
-        <h1 class="text-white text-2xl font-bold flex items-center gap-2">
-            <i class="fa-solid fa-hotel"></i> Hotel Booking
-        </h1>
+    <nav class="bg-[#1a4d6e] p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-white text-2xl font-bold flex items-center gap-2">
+                <i class="fa-solid fa-hotel"></i> Hotel Booking
+            </h1>
 
-        <!-- Auth Buttons -->
-        {% if user.is_authenticated %}
-            <a href="{% url 'logout' %}" 
-               class="bg-red-600 text-white font-semibold px-4 py-2 rounded hover:bg-red-700 transition">
-                <i class="fa fa-sign-out-alt"></i> Logout
-            </a>
-        {% else %}
-            <a href="{% url 'login' %}" 
-               class="bg-white text-[#1a4d6e] font-semibold px-4 py-2 rounded hover:bg-gray-200 transition">
-                <i class="fa fa-sign-in-alt"></i> Login
-            </a>
-        {% endif %}
-    </div>
-</nav>
-
+            <!-- Auth Buttons -->
+            {% if user.is_authenticated %}
+                <div class="flex items-center gap-2">
+                    <a href="{% url 'dashboard' %}" 
+                       class=" text-white font-semibold px-4 py-2 rounded hover:bg-blue-700 transition">
+                        <i class="fa fa-tachometer-alt"></i> Dashboard
+                    </a>
+                    <a href="{% url 'dashboard' %}" 
+                       class=" text-white font-semibold px-4 py-2 rounded hover:bg-blue-700 transition">
+                        <i class="fa fa-book"></i> My Bookings
+                    </a>
+                    <a href="{% url 'logout' %}" 
+                       class=" text-white font-semibold px-4 py-2 rounded hover:bg-blue-700 transition">
+                        <i class="fa fa-sign-out-alt"></i> Logout
+                    </a>
+                </div>
+            {% else %}
+                <a href="{% url 'login' %}" 
+                   class="bg-white text-[#1a4d6e] font-semibold px-4 py-2 rounded hover:bg-gray-200 transition">
+                    <i class="fa fa-sign-in-alt"></i> Login
+                </a>
+            {% endif %}
+        </div>
+    </nav>
 
     <!-- Search Form -->
     <div class="container mx-auto mt-6 px-4">
